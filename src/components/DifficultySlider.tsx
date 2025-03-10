@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
     View,
     Text,
@@ -31,14 +31,16 @@ const DifficultySlider: React.FC<DifficultySliderProps> = ({
     showLabels = true,
 }) => {
     const [sliderWidth, setSliderWidth] = useState(0);
-    const translateX = new Animated.Value(0);
+    const translateX = useRef(new Animated.Value(0)).current;
     const [offset, setOffset] = useState(0);
+    const lastValue = useRef(value);
 
     // Calculate the initial position based on the value
     React.useEffect(() => {
-        if (sliderWidth > 0) {
+        if (sliderWidth > 0 && value !== lastValue.current) {
             const position = ((value - min) / (max - min)) * sliderWidth;
             translateX.setValue(position);
+            lastValue.current = value;
         }
     }, [value, min, max, sliderWidth, translateX]);
 
@@ -48,15 +50,34 @@ const DifficultySlider: React.FC<DifficultySliderProps> = ({
         setSliderWidth(width);
     };
 
+    // Helper function to convert position to value
+    const positionToValue = (position: number): number => {
+        const ratio = position / sliderWidth;
+        const range = max - min;
+        let newValue = min + ratio * range;
+
+        // Apply step if provided
+        if (step > 0) {
+            newValue = Math.round(newValue / step) * step;
+        }
+
+        // Ensure the value is within bounds
+        return Math.max(min, Math.min(max, newValue));
+    };
+
     // Create pan responder for handling touch events
     const panResponder = React.useRef(
         PanResponder.create({
             onStartShouldSetPanResponder: () => true,
             onMoveShouldSetPanResponder: () => true,
             onPanResponderGrant: () => {
-                const currentValue = Number(JSON.stringify(translateX));
+                let currentValue = 0;
+                translateX.addListener(({ value }) => {
+                    currentValue = value;
+                });
                 setOffset(currentValue);
                 translateX.setValue(0);
+                translateX.removeAllListeners();
             },
             onPanResponderMove: (_, gestureState) => {
                 let newX = gestureState.dx;
@@ -69,36 +90,36 @@ const DifficultySlider: React.FC<DifficultySliderProps> = ({
                 }
 
                 translateX.setValue(newX);
+
+                // Update value while dragging for smooth feedback
+                const currentPosition = offset + newX;
+                const newValue = positionToValue(currentPosition);
+                if (newValue !== lastValue.current) {
+                    onValueChange(newValue);
+                    lastValue.current = newValue;
+                }
             },
             onPanResponderRelease: () => {
-                const currentValue = Number(JSON.stringify(translateX));
+                let currentValue = 0;
+                translateX.addListener(({ value }) => {
+                    currentValue = value;
+                });
                 const currentPosition = offset + currentValue;
-                translateX.setValue(currentPosition);
-                setOffset(0);
+                translateX.removeAllListeners();
 
-                // Calculate the new value based on the position
-                const ratio = currentPosition / sliderWidth;
-                const range = max - min;
-                let newValue = min + ratio * range;
+                const newValue = positionToValue(currentPosition);
+                const newPosition =
+                    ((newValue - min) / (max - min)) * sliderWidth;
 
-                // Apply step if provided
-                if (step > 0) {
-                    newValue = Math.round(newValue / step) * step;
-                }
-
-                // Ensure the value is within bounds
-                newValue = Math.max(min, Math.min(max, newValue));
-
-                // Update the position to match the stepped value
-                const newPosition = ((newValue - min) / range) * sliderWidth;
                 Animated.timing(translateX, {
                     toValue: newPosition,
                     duration: 100,
                     useNativeDriver: true,
                 }).start();
 
-                // Call the callback with the new value
+                setOffset(0);
                 onValueChange(newValue);
+                lastValue.current = newValue;
             },
         })
     ).current;
